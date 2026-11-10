@@ -44,7 +44,7 @@ Box của xe nhỏ ở xa còn rộng hơn xe (IoU 0.2–0.48 ở drive_045, dri
 | Recall | 0.5758 | 0.6325|
 | F1 | 0.5893 | 0.5760 |
 | mean_iou_of_matches | 0.8550 | 	0.8376 |
-| passed | | |
+| passed | false | false |
 
 Dẫn tới `outputs/annotation_evaluation.json` trong repo. Nếu rework, ghi ảnh, lỗi đã kiểm, quyết định sửa/giữ và lý do. Không suy nguyên nhân chỉ từ FP/FN. Không có rework thì ghi rõ.
 
@@ -77,23 +77,38 @@ Quyết định: giữ nguyên lớp theo schema data.yaml, không đổi lớp 
 
 Đặt cả 2 folder `assets/eval_predictions/` và `assets/yolo26_runs/` (giải nén từ `day2_colab_outputs.zip`) cạnh báo cáo và dẫn link tương đối. Không chỉ ghi số; chỉ ra ít nhất một ảnh và vật thể cụ thể.
 
+- drive_052: xe buýt 2 tầng giữa ảnh bị đoán là car 0.39, box chỉ phủ đầu xe. Sai lớp và box thiếu.
+
 Trả lời bốn câu hỏi cuối notebook:
 
-1. Lớp nào recall thấp nhất? Ảnh nào minh họa?
-2. Nếu mAP50 cao nhưng mAP50–95 thấp, cần kiểm điều gì trên box?
-3. Lỗi class nào có thể liên quan guideline? Dữ kiện nào hỗ trợ nhận xét?
-4. Vì sao không dùng 10 ảnh eval để train? Vai trò validation của chúng trong notebook là gì?
+1. Lớp nào recall thấp nhất? Ảnh nào minh họa? truck (0/5) và van (0/12) có recall = 0. Model gán gần như mọi xe là car: xe buýt 2 tầng ở drive_052 bị dự đoán car 0.39 và box chỉ phủ đầu xe; xe buýt xanh ở drive_053 bị tách thành nhiều box car (0.30, 0.58, 0.88); xe buýt vàng bên trái drive_058 và xe thân hộp đỏ ở drive_056 (car 0.95) cũng bị gán car. Nguyên nhân: dữ liệu train lệch nặng (539 car so với 26 truck, 58 bus) và bộ nhãn train không có box van nào nên model không thể học lớp này. 
+2. Nếu mAP50 cao nhưng mAP50–95 thấp, cần kiểm điều gì trên box? Với car, mAP50 0.705 nhưng mAP50–95 chỉ 0.418: model tìm đúng xe nhưng box chưa khít, rớt ở ngưỡng IoU 0.75–0.95. Cần kiểm: cạnh box có ôm sát thân xe hay lấn mặt đường/bóng xe (đặc biệt xe nhỏ ở xa); xe lớn có bị tách thành nhiều box (drive_053); xe bị che/cắt khung có được vẽ đúng phần nhìn thấy; nhãn train có nhất quán độ chặt (khi chấm annotation, box xe nhỏ của tôi thường rộng hơn gold 1.5–2 lần).
+3. Lỗi class nào có thể liên quan guideline? Dữ kiện nào hỗ trợ nhận xét? Ranh giới van / truck / bus. Dữ kiện: (a) khi chấm annotation, các box đúng vị trí nhưng khác lớp theo quy luật cố định bus ↔ gold 3, van ↔ gold 1, truck ↔ gold 2; (b) xem ảnh: gold gán id 3 cho xe buýt (drive_009, eval drive_052) và id 1 cho xe hộp nhỏ (drive_027), trái với data.yaml; (c) tập eval dùng cùng cách gán nên kể cả khi model nhận ra xe buýt cũng bị tính sai lớp, góp phần làm recall van = 0. Ngoài ra bộ nhãn train ban đầu thiếu hẳn lớp van, cho thấy định nghĩa van trong guideline lúc gán nhãn chưa được áp dụng nhất quán.
+4. Vì sao không dùng 10 ảnh eval để train? Vai trò validation của chúng trong notebook là gì? 10 ảnh eval phải là dữ liệu model chưa thấy để đo khả năng tổng quát hóa; đưa vào train sẽ rò rỉ dữ liệu và làm chỉ số cao ảo (notebook kiểm tra và in "eval không đi vào train"). Trong notebook, data.yaml đặt val: images/eval: sau mỗi epoch YOLO tính P/R/mAP trên 10 ảnh này để chọn best.pt, sau đó best_model.val() và bước predict trực quan cũng chạy trên tập này. Lưu ý: vì best.pt được chọn theo chính tập eval nên chỉ số có thể hơi lạc quan; chỉ 10 ảnh và 2 xe buýt nên chỉ số theo lớp dao động mạnh.
 
 ## 6. Khó khăn và cách xử lý
 
 | Bước/thời điểm | Lỗi quan sát | Cách đã thử | Kết quả/còn thiếu |
-|---|---|---|---|
-| | | | |
+| Gold QC |Nhiều box đúng vị trí nhưng sai lớp theo quy luật cố định | Cắt ảnh từng ca để xem; thử đọc gold theo thứ tự lớp khác | Gold có vẻ dùng car/van/truck/bus; F1 đối chiếu ≈ 0.66–0.67; labcoach xác nhận gold sai; giữ nhãn theo schema |
+| Rework | Thêm xe nhưng F1 không tăng | Phân tích từng box mới: nhiều box xe nhỏ bị rộng (IoU < 0.5) | Recall tăng 0.576 → 0.633, FP tăng; cần vẽ sát hơn ở xe nhỏ |
+| Train YOLO | Recall truck/van = 0 | Kiểm tra phân bố lớp của bộ nhãn train | Bộ train có 0 van, 26 truck; dữ liệu lệch nặng về car |
 
 ## 7. Tự đánh giá theo rubric
 
 Đối chiếu [RUBRIC.md](../../RUBRIC.md): phần nào đã có kết quả, phần nào còn thiếu hoặc chưa kiểm được. Không tự nhận hoàn thành bước chưa chạy.
+| Tiêu chí |	Tự đánh giá |
+| Hoàn thành và định dạng YOLO (10) |	Đạt: 50 file, checker chạy đạt |
+| Đầy đủ vật thể (20) |	Một phần: còn bỏ sót xe ở ảnh đông xe (recall 0.63) |
+| Độ bám sát box (20) |	Khá: mean IoU 0.84; box xe nhỏ ở xa còn rộng |
+| Phân lớp nhất quán (15)	| Một phần: lớp gán theo data.yaml; bộ khóa ban đầu chưa gán van | 
+| Mini guideline (10) |	Đạt: có định nghĩa lớp, quy tắc box, 4 ca mơ hồ có lý do |
+| Gold-set QC (15) |	Chưa đạt ngưỡng F1 0.80; có vòng rework và giải thích nguyên nhân (gold lệch thứ tự lớp, thầy xác nhận) |
+| Pipeline YOLO và phân tích (10) |	Đạt: Colab chạy được, không dùng eval để train, có metrics, ảnh eval và nhận xét lỗi |
 
 ## 8. Công cụ AI và tài liệu tham khảo
 
 Ghi công cụ đã dùng, dùng ở bước nào và phần đã tự kiểm tra; không dùng thì ghi rõ. Liệt kê nguồn ngoài repo được sử dụng. Không ghi mật khẩu/token hoặc đính kèm gold train.
+
+Claude (Anthropic): chạy check_yolo_labels.py và evaluate_annotations.py, thống kê lỗi theo từng ảnh và từng lớp, cắt ảnh để xem các ca sai lớp (phát hiện gold lệch thứ tự lớp), gợi ý nội dung quy tắc chung / bảng ca mơ hồ trong guideline và soạn báo cáo này. Các số liệu lấy trực tiếp từ output của script và notebook Colab.
+CVAT để gán nhãn; Google Colab + Ultralytics để train/eval.
+Không dùng nguồn ngoài repo. Không đính kèm gold train.
